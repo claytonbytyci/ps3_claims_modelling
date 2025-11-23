@@ -23,10 +23,9 @@ weight = df["Exposure"].values
 df["PurePremium"] = df["ClaimAmountCut"] / df["Exposure"]
 y = df["PurePremium"]
 # %%
-# TODO: Why do you think, we divide by exposure here to arrive at our outcome variable?
-# We want to know the risk per unit of exposure, so we model pure premium.
+# We divide by exposure to model pure premium (expected claims per unit exposure).
 
-# TODO: use your create_sample_split function here
+# Split data into train/test sets using deterministic hash of the policy ID
 df = create_sample_split(df, id_column="IDpol", training_frac=0.7)
 train = np.where(df["sample"] == "train")
 test = np.where(df["sample"] == "test")
@@ -78,7 +77,7 @@ print(
     )
 )
 # %%
-# TODO: Let's add splines for BonusMalus and Density and use a Pipeline.
+# Add splines for BonusMalus and Density and use a Pipeline.
 # Steps:
 # 1. Define a Pipeline which chains a StandardScaler and SplineTransformer.
 #    Choose knots="quantile" for the SplineTransformer and make sure, we
@@ -117,33 +116,38 @@ preprocessor = ColumnTransformer(
 
 preprocessor.set_output(transform="pandas")
 # %%
-model_pipeline = Pipeline(
+glm_pipeline = Pipeline(
     steps=[
         ("preprocess", preprocessor),
-        ("estimate", t_glm1),  # whatever GLM object you created earlier
+        (
+            "estimate",
+            GeneralizedLinearRegressor(
+                family=TweedieDist, l1_ratio=1, fit_intercept=True
+            ),
+        ),
     ]
 )
 
 
 # let's have a look at the pipeline
-model_pipeline
+glm_pipeline
 # %%
 # let's check that the transforms worked
-model_pipeline[:-1].fit_transform(df_train)
+glm_pipeline[:-1].fit_transform(df_train)
 
-model_pipeline.fit(df_train, y_train_t, estimate__sample_weight=w_train_t)
+glm_pipeline.fit(df_train, y_train_t, estimate__sample_weight=w_train_t)
 
 pd.DataFrame(
     {
         "coefficient": np.concatenate(
-            ([model_pipeline[-1].intercept_], model_pipeline[-1].coef_)
+            ([glm_pipeline[-1].intercept_], glm_pipeline[-1].coef_)
         )
     },
-    index=["intercept"] + model_pipeline[-1].feature_names_,
+    index=["intercept"] + glm_pipeline[-1].feature_names_,
 ).T
 
-df_test["pp_t_glm2"] = model_pipeline.predict(df_test)
-df_train["pp_t_glm2"] = model_pipeline.predict(df_train)
+df_test["pp_t_glm2"] = glm_pipeline.predict(df_test)
+df_train["pp_t_glm2"] = glm_pipeline.predict(df_train)
 
 print(
     "training loss t_glm2:  {}".format(
@@ -167,7 +171,7 @@ print(
 )
 
 # %%
-# TODO: Let's use a GBM instead as an estimator.
+# Use a GBM instead as an estimator.
 # Steps
 # 1: Define the modelling pipeline. Tip: This can simply be a LGBMRegressor based on X_train_t from before.
 # 2. Make sure we are choosing the correct objective for our estimator.
@@ -176,7 +180,7 @@ from lightgbm import LGBMRegressor
 from sklearn.pipeline import Pipeline
 
 # 1: Define the modelling pipeline (no preprocessing needed, X_train_t is already numeric)
-model_pipeline = Pipeline(
+lgbm_pipeline = Pipeline(
     steps=[
         (
             "estimate",
@@ -193,9 +197,9 @@ model_pipeline = Pipeline(
     ]
 )
 
-model_pipeline.fit(X_train_t, y_train_t, estimate__sample_weight=w_train_t)
-df_test["pp_t_lgbm"] = model_pipeline.predict(X_test_t)
-df_train["pp_t_lgbm"] = model_pipeline.predict(X_train_t)
+lgbm_pipeline.fit(X_train_t, y_train_t, estimate__sample_weight=w_train_t)
+df_test["pp_t_lgbm"] = lgbm_pipeline.predict(X_test_t)
+df_train["pp_t_lgbm"] = lgbm_pipeline.predict(X_train_t)
 print(
     "training loss t_lgbm:  {}".format(
         TweedieDist.deviance(y_train_t, df_train["pp_t_lgbm"], sample_weight=w_train_t)
@@ -211,7 +215,7 @@ print(
 )
 
 # %%
-# TODO: Let's tune the LGBM to reduce overfitting.
+# Tune the LGBM to reduce overfitting with a small grid search.
 # Steps:
 # 1. Define a `GridSearchCV` object with our lgbm pipeline/estimator. Tip: Parameters for a specific step of the pipeline
 # can be passed by <step_name>__param.
@@ -225,7 +229,7 @@ param_grid = {
 }
 
 cv = GridSearchCV(
-    estimator=pp_t_lgbm,   # <-- use your actual pipeline variable here
+    estimator=lgbm_pipeline,   # <-- use your actual pipeline variable here
     param_grid=param_grid,
     cv=5,
     n_jobs=-1,

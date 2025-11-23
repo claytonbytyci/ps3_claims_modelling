@@ -3,8 +3,7 @@ import hashlib
 import numpy as np
 
 
-# TODO: Write a function which creates a sample split based in some id_column and training_frac.
-# Optional: If the dtype of id_column is a string, we can use hashlib to get an integer representation. #DONE.
+# Deterministic sample split based on a hashed id_column; robust to string IDs via hashlib.
 def create_sample_split(df, id_column, training_frac=0.7):
     """Create sample split based on ID column.
 
