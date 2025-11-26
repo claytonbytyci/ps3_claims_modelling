@@ -26,19 +26,25 @@ def load_transform():
     6. ``'VehPower'``, ``'VehAge'``, and ``'DrivAge'`` are clipped and/or digitized
        into bins so they can be used as categoricals later on.
     """
+    #%%
+
     # load the datasets
     # first row (=column names) uses "", all other rows use ''
     # use '' as quotechar as it is easier to change column names
-
-    df = pd.read_csv("hf://datasets/mabilton/fremtpl2/freMTPL2freq.csv")
-
+    df = pd.read_csv(
+        "https://huggingface.co/datasets/mabilton/fremtpl2/resolve/main/freMTPL2freq.csv", quotechar="'"
+    )
+   #%%
     # rename column names '"name"' => 'name'
     df = df.rename(lambda x: x.replace('"', ""), axis="columns")
     df["IDpol"] = df["IDpol"].astype(np.int64)
     df.set_index("IDpol", inplace=True)
+#%%
+    df_sev = pd.read_csv(
+        "https://huggingface.co/datasets/mabilton/fremtpl2/resolve/main/freMTPL2sev.csv", index_col=0
+    )
 
-    df_sev = pd.read_csv("hf://datasets/mabilton/fremtpl2/freMTPL2sev.csv")
-
+#%%
     # join ClaimAmount from df_sev to df:
     #   1. cut ClaimAmount at 100_000
     #   2. aggregate ClaimAmount per IDpol
@@ -46,11 +52,11 @@ def load_transform():
     df_sev["ClaimAmountCut"] = df_sev["ClaimAmount"].clip(upper=100_000)
     df = df.join(df_sev.groupby(level=0).sum(), how="left")
     df.fillna(value={"ClaimAmount": 0, "ClaimAmountCut": 0}, inplace=True)
-
+#%%
     # Note: Zero claims must be ignored in severity models,
     # because the support is (0, inf) not [0, inf).
     df.loc[(df.ClaimAmount <= 0) & (df.ClaimNb >= 1), "ClaimNb"] = 0
-
+#%%
     # correct for unreasonable observations (that might be data error)
     # see case study paper
     df["ClaimNb"] = df["ClaimNb"].clip(upper=4)
