@@ -352,6 +352,7 @@ plt.show()
 # Note: We have to provide a list of the same length as our features with 0s
 # everywhere except for BonusMalus where we put a 1.
 # See: Parameters — LightGBM 4.5.0.99 documentation
+
 monotonicity_constraints = []
 for col in X_train_t.columns:
     if col == "BonusMalus":
