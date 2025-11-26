@@ -362,7 +362,7 @@ for col in X_train_t.columns:
 constrained_lgbm = LGBMRegressor(
     objective="tweedie",
     tweedie_variance_power=1.5,
-    learning_rate=0.1,
+    learning_rate=0.2,
     n_estimators=80,
     subsample=0.5,
     colsample_bytree=0.5,
@@ -378,8 +378,8 @@ constrained_lgbm_pipeline = Pipeline([("estimate", constrained_lgbm)])
 # Save the predictions in the column pp_t_lgbm_constrained.
 
 param_grid = {
-    "estimate__learning_rate": [0.01, 0.05, 0.1],
-    "estimate__n_estimators": [200, 500, 800],
+    "estimate__learning_rate": [0.04, 0.05, 0.1],
+    "estimate__n_estimators": [40, 80, 100],
 }
 
 cv_constrained = GridSearchCV(
@@ -415,15 +415,39 @@ print(
 # Task
 # Based on the cross-validated constrained `LGBMRegressor` object,
 # plot a learning curve which is showing the convergence of the score on the train and test set.
+
 # Steps
+
 # 1. Re-fit the best constrained lgbm estimator from the cross-validation and
 # provide the tuples of the test and train dataset to the estimator via `eval_set`.
+
+cv_constrained.best_estimator_.fit(
+    X_train_t,
+    y_train_t,
+    estimate__sample_weight=w_train_t,
+    estimate__eval_set=[(X_train_t, y_train_t), (X_test_t, y_test_t)],
+    estimate__eval_sample_weight=[w_train_t, w_test_t],
+    estimate__eval_metric="tweedie",
+    estimate__verbose=False,
+)
 
 # 2. Plot the learning curve by running `lgb.plot_metric` on the
 # estimator (either the estimator directly or as last step of the pipeline).
 
+import lightgbm as lgb
+lgb.plot_metric(cv_constrained.best_estimator_.named_steps["estimate"])
+plt.title("Learning Curve for Constrained LGBM")
+plt.show()
+
 # 3. What do you notice, is the estimator tuned optimally?
 
+# The learning curve shows that the training loss continues to decrease,
+# indicating that the model is still learning from the training data.
+# However, the validation loss starts to increase after a certain number of iterations,
+# suggesting that the model begins to overfit the training data.
+# This indicates that the estimator is not tuned optimally,
+# and further tuning or early stopping may be necessary to achieve better generalization.
+# %%
 # Ex 3 Metrics function
 ## **Objective**
 # When running multiple models in various contexts, it is convenient
@@ -438,11 +462,12 @@ print(
 # Steps:
 # 1. Create a module folder `evaluation` and an empty `__init__.py`
 # which we will use to register the function at the module level.
-
 # 2. Create a new file `_evaluate_predictions.py` in which you create
 #  the respective function which takes the predictions
 # and actuals as input, as well as some sample weight
 # (in our case exposure).
+
+from ps3.evaluation._evaluate_predictions import evaluate_predictions
 
 # 3. Compute the bias of your estimates as deviation
 #  from the actual exposure adjusted mean
