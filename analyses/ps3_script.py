@@ -542,10 +542,37 @@ print(metrics_df)
 # 1. Define an explainer object using the constrained lgbm model, data and features.
 # For help, see here: https://ema.drwhy.ai/partialDependenceProfiles.html#PDPPython
 
+from dalex import Explainer, model_profile
+
+constrained_explainer = Explainer(
+    model=cv_constrained.best_estimator_,
+    data=X_test_t,
+    y=y_test_t,
+    label="Constrained LGBM"
+)
+
+unconstrained_explainer = Explainer(
+    model=cv.best_estimator_,
+    data=X_test_t,
+    y=y_test_t,
+    label="Unconstrained LGBM"
+)
+
 # 2. Now compute the marginal effects using `model_profile`
 # and plot the PDPs.
 # Note: If you receive a `numpy` error related to `ptp` simply downgrade `numpy` to <2 by `conda install numpy<2` and restarting your environment. The DALEX package does only support `numpy>=2` for versions >1.7.0. You might also have to install `nbformat`.
 
+pdp_constrained = model_profile(constrained_explainer)
+pdp_constrained.plot()
+plt.suptitle("PDPs for Constrained LGBM", y=1.02)
+plt.show()
+
+pdp_unconstrained = model_profile(unconstrained_explainer)
+pdp_unconstrained.plot()
+plt.suptitle("PDPs for Unconstrained LGBM", y=1.02)
+plt.show()
+
+#%%
 # Ex 5 Shapley
 
 ## **Objective**
