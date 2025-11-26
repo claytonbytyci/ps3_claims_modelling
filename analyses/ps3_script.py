@@ -13,16 +13,13 @@ from sklearn.preprocessing import OneHotEncoder, SplineTransformer, StandardScal
 
 from ps3.data import create_sample_split, load_transform
 
-# %%
 # load data
 df = load_transform()
 
-# %%
 # Train benchmark tweedie model. This is entirely based on the glum tutorial.
 weight = df["Exposure"].values
 df["PurePremium"] = df["ClaimAmountCut"] / df["Exposure"]
 y = df["PurePremium"]
-# %%
 # We divide by exposure to model pure premium (expected claims per unit exposure).
 
 # Split data into train/test sets using deterministic hash of the policy ID
@@ -31,7 +28,6 @@ train = np.where(df["sample"] == "train")
 test = np.where(df["sample"] == "test")
 df_train = df.iloc[train].copy()
 df_test = df.iloc[test].copy()
-# %%
 
 categoricals = ["VehBrand", "VehGas", "Region", "Area", "DrivAge", "VehAge", "VehPower"]
 
@@ -46,7 +42,6 @@ w_train_t, w_test_t = weight[train], weight[test]
 TweedieDist = TweedieDistribution(1.5)
 t_glm1 = GeneralizedLinearRegressor(family=TweedieDist, l1_ratio=1, fit_intercept=True)
 t_glm1.fit(X_train_t, y_train_t, sample_weight=w_train_t)
-# %%
 
 pd.DataFrame(
     {"coefficient": np.concatenate(([t_glm1.intercept_], t_glm1.coef_))},
@@ -76,7 +71,7 @@ print(
         np.sum(df["Exposure"].values[test] * t_glm1.predict(X_test_t)),
     )
 )
-# %%
+
 # Add splines for BonusMalus and Density and use a Pipeline.
 # Steps:
 # 1. Define a Pipeline which chains a StandardScaler and SplineTransformer.
@@ -105,7 +100,7 @@ numeric_pipeline = Pipeline(
         ),
     ]
 )
-# %%
+
 # Let's put together a pipeline
 preprocessor = ColumnTransformer(
     transformers=[
@@ -115,7 +110,7 @@ preprocessor = ColumnTransformer(
 )
 
 preprocessor.set_output(transform="pandas")
-# %%
+
 glm_pipeline = Pipeline(
     steps=[
         ("preprocess", preprocessor),
@@ -131,7 +126,7 @@ glm_pipeline = Pipeline(
 
 # let's have a look at the pipeline
 glm_pipeline
-# %%
+
 # let's check that the transforms worked
 glm_pipeline[:-1].fit_transform(df_train)
 
@@ -176,30 +171,35 @@ print(
 # 1: Define the modelling pipeline. Tip: This can simply be a LGBMRegressor based on X_train_t from before.
 # 2. Make sure we are choosing the correct objective for our estimator.
 
+# 1: Define the modelling pipeline (no preprocessing needed, X_train_t is already numeric)
 from lightgbm import LGBMRegressor
 from sklearn.pipeline import Pipeline
 
-# 1: Define the modelling pipeline (no preprocessing needed, X_train_t is already numeric)
-lgbm_pipeline = Pipeline(
-    steps=[
-        (
-            "estimate",
-            LGBMRegressor(
-                objective="tweedie",          # correct objective for Tweedie pure premium
-                tweedie_variance_power=1.5,  # same power as TweedieDistribution(1.5)
-                learning_rate=0.05,
-                n_estimators=500,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=0,
-            ),
-        )
-    ]
+lgbm_fast = LGBMRegressor(
+    objective="tweedie",
+    tweedie_variance_power=1.5,
+    learning_rate=0.1,
+    n_estimators=80,
+    subsample=0.5,
+    colsample_bytree=0.5,
+    num_leaves=12,
+    max_depth=4,
+    n_jobs=-1,
+    force_col_wise=True,
+    random_state=0,
 )
 
-lgbm_pipeline.fit(X_train_t, y_train_t, estimate__sample_weight=w_train_t)
+lgbm_pipeline = Pipeline([("estimate", lgbm_fast)])
+
+lgbm_pipeline.fit(
+    X_train_t,
+    y_train_t,
+    estimate__sample_weight=w_train_t,
+)
+
 df_test["pp_t_lgbm"] = lgbm_pipeline.predict(X_test_t)
 df_train["pp_t_lgbm"] = lgbm_pipeline.predict(X_train_t)
+
 print(
     "training loss t_lgbm:  {}".format(
         TweedieDist.deviance(y_train_t, df_train["pp_t_lgbm"], sample_weight=w_train_t)
@@ -223,19 +223,18 @@ print(
 # Note: Typically we tune many more parameters and larger grids,
 # but to save compute time here, we focus on getting the learning rate
 # and the number of estimators somewhat aligned -> tune learning_rate and n_estimators
+#%%
 param_grid = {
     "estimate__learning_rate": [0.01, 0.05, 0.1],
-    "estimate__n_estimators": [100, 300, 600],
+    "estimate__n_estimators": [200, 500, 800],
 }
 
 cv = GridSearchCV(
-    estimator=lgbm_pipeline,   # <-- use your actual pipeline variable here
+    estimator=lgbm_pipeline,
     param_grid=param_grid,
     cv=5,
-    n_jobs=-1,
-    verbose=1,
 )
-
+#%%
 cv.fit(X_train_t, y_train_t, estimate__sample_weight=w_train_t)
 
 df_test["pp_t_lgbm"] = cv.best_estimator_.predict(X_test_t)
@@ -261,9 +260,8 @@ print(
         np.sum(df["Exposure"].values[test] * df_test["pp_t_lgbm"]),
     )
 )
-# %%
-# Let's compare the sorting of the pure premium predictions
 
+# Let's compare the sorting of the pure premium predictions
 
 # Source: https://scikit-learn.org/stable/auto_examples/linear_model/plot_tweedie_regression_insurance_claims.html
 def lorenz_curve(y_true, y_pred, exposure):
@@ -313,3 +311,194 @@ ax.legend(loc="upper left")
 plt.plot()
 
 # %%
+## PS4
+
+# Ex 1 Monotonicity constraints
+## **Objective**
+# We consider again the risk modelling task of problem set 3. The bonus malus feature tracks the
+# claim history of the customer and the price is expected to increase if their bonus malus score
+# gets worse and decrease if their score improves. We will likely find this to hold empirically
+#  in a simple model with enough exposure for each bin, but the more complex our models get,
+#  i.e. the more interactions they entail, the more likely it is that there might be edge cases
+#  in which this monotonicity breaks. Hence, we would like to include an explicit monotonicity
+# constraint for this feature.
+
+## Tasks
+# Train a constrained LGBM by introducing a monotonicity constraint for `BonusMalus` into the
+# `LGBMRegressor`. Cross-validate is and compare the prediction accuracy of the constrained
+# estimator to the unconstrained one.
+
+# 1. Create a plot of the average claims per BonusMalus group,
+# make sure to weigh them by exposure.
+# What will/could happen if we do not include a monotonicity constraint?
+df_bonus = df.groupby("BonusMalus").agg(
+    total_claims=("ClaimAmountCut", "sum"),
+    total_exposure=("Exposure", "sum")
+).reset_index()
+df_bonus["avg_claims_per_bonusmalus"] = df_bonus["total_claims"] / df_bonus["total_exposure"]
+plt.figure(figsize=(10,6))
+plt.plot(df_bonus["BonusMalus"], df_bonus["avg_claims_per_bonusmalus"], marker='o')
+plt.title("Average Claims per BonusMalus Group (Weighted by Exposure)")
+plt.xlabel("BonusMalus")
+plt.ylabel("Average Claims per Unit Exposure")
+plt.grid()
+plt.show()
+# Without a monotonicity constraint, the model might learn a non-monotonic relationship
+# between BonusMalus and expected claims, which could lead to counterintuitive pricing
+# where better drivers (lower BonusMalus) are predicted to have higher claims than worse drivers
+# %%
+# 2. Create a new model pipeline or estimator called constrained_lgbm.
+# Introduce an increasing monotonicity constrained for BonusMalus.
+# Note: We have to provide a list of the same length as our features with 0s
+# everywhere except for BonusMalus where we put a 1.
+# See: Parameters — LightGBM 4.5.0.99 documentation
+monotonicity_constraints = []
+for col in X_train_t.columns:
+    if col == "BonusMalus":
+        monotonicity_constraints.append(1)
+    else:
+        monotonicity_constraints.append(0)
+
+constrained_lgbm = LGBMRegressor(
+    objective="tweedie",
+    tweedie_variance_power=1.5,
+    learning_rate=0.1,
+    n_estimators=80,
+    subsample=0.5,
+    colsample_bytree=0.5,
+    num_leaves=12,
+    max_depth=4,
+    n_jobs=-1,
+    force_col_wise=True,
+    random_state=0,
+    monotone_constraints=monotonicity_constraints
+)
+constrained_lgbm_pipeline = Pipeline([("estimate", constrained_lgbm)])
+#3. Cross-validate and predict using the best estimator.
+# Save the predictions in the column pp_t_lgbm_constrained.
+
+param_grid = {
+    "estimate__learning_rate": [0.01, 0.05, 0.1],
+    "estimate__n_estimators": [200, 500, 800],
+}
+
+cv_constrained = GridSearchCV(
+    estimator=constrained_lgbm_pipeline,
+    param_grid=param_grid,
+    cv=5,
+)
+cv_constrained.fit(X_train_t, y_train_t, estimate__sample_weight=w_train_t)
+
+df_test["pp_t_lgbm_constrained"] = cv_constrained.best_estimator_.predict(X_test_t)
+df_train["pp_t_lgbm_constrained"] = cv_constrained.best_estimator_.predict(X_train_t)
+
+print(
+    "training loss t_lgbm_constrained:  {}".format(
+        TweedieDist.deviance(y_train_t, df_train["pp_t_lgbm_constrained"], sample_weight=w_train_t)
+        / np.sum(w_train_t)
+    )
+)
+print(
+    "testing loss t_lgbm_constrained:  {}".format(
+        TweedieDist.deviance(y_test_t, df_test["pp_t_lgbm_constrained"], sample_weight=w_test_t)
+        / np.sum(w_test_t)
+    )
+)
+
+#%%
+# Ex2 Learning Curve
+## **Objective**
+# For iterative optimisation algorithms, such as GBMs, it is important to track their
+# convergence in order to understand, whether they converged successfully or by what extend
+#  they are under- or overfitting.
+
+# Task
+# Based on the cross-validated constrained `LGBMRegressor` object,
+# plot a learning curve which is showing the convergence of the score on the train and test set.
+# Steps
+# 1. Re-fit the best constrained lgbm estimator from the cross-validation and
+# provide the tuples of the test and train dataset to the estimator via `eval_set`.
+
+# 2. Plot the learning curve by running `lgb.plot_metric` on the
+# estimator (either the estimator directly or as last step of the pipeline).
+
+# 3. What do you notice, is the estimator tuned optimally?
+
+# Ex 3 Metrics function
+## **Objective**
+# When running multiple models in various contexts, it is convenient
+#  to have a function which returns various performance metrics
+# of the model, so we don’t have to compute them every time from
+# scratch again.
+
+### Task
+# Write a function `evaluate_predictions` within the `evaluation`
+# module, which computes various metrics given the true outcome
+# values and the model’s predictions.
+# Steps:
+# 1. Create a module folder `evaluation` and an empty `__init__.py`
+# which we will use to register the function at the module level.
+
+# 2. Create a new file `_evaluate_predictions.py` in which you create
+#  the respective function which takes the predictions
+# and actuals as input, as well as some sample weight
+# (in our case exposure).
+
+# 3. Compute the bias of your estimates as deviation
+#  from the actual exposure adjusted mean
+
+# 4. Compute the deviance.
+
+# 5. Compute the MAE and RMSE.
+
+# 6. Bonus: Compute the Gini coefficient as defined in the plot
+#  of the Lorentz curve at the bottom of `ps3_script`.
+
+# 7. Return a dataframe with the names of the metrics as index.
+
+# 8. Use the function and compare the constrained
+# and unconstrained lgbm models.
+
+# # Ex 4 Evaluation plots
+
+## **Objective**
+# Now that we have fitted several models, and computed some metrics,
+# we want to better understand how specific features
+# drive predictions. One model-agnostic way to illustrate the marginal
+# effects are Partial Dependence Plots (PDPs).
+# See: https://christophm.github.io/interpretable-ml-book/pdp.html
+
+### Task
+# Plots the PDPs of all features and compare the PDPs between the
+# unconstrained and constrained LGBM.
+# Use the DALEX package as it offers more functionality as the
+# `sklearn.inspection` module.
+
+# Steps:
+# 1. Define an explainer object using the constrained lgbm model, data and features.
+# For help, see here: https://ema.drwhy.ai/partialDependenceProfiles.html#PDPPython
+
+# 2. Now compute the marginal effects using `model_profile`
+# and plot the PDPs.
+# Note: If you receive a `numpy` error related to `ptp` simply downgrade `numpy` to <2 by `conda install numpy<2` and restarting your environment. The DALEX package does only support `numpy>=2` for versions >1.7.0. You might also have to install `nbformat`.
+
+# Ex 5 Shapley
+
+## **Objective**
+# Sometimes we want to understand model predictions on a more granular
+# level, particularly, what features are driving predictions
+# upwards or downwards and by how much. This interpretation demands
+# additivity in the feature effects and this is exactly what SHAP
+# (SHapley Additive exPlanations) values (https://arxiv.org/abs/1705.07874) are providing us.
+# Task
+# Compare the decompositions of the predictions for some specific row
+# (e.g. the first row of the test set) for the constrained LGBM
+# and our initial GLM.
+
+# Step:
+# 1. Define DALEX Explainer objects for both.
+
+# 2. Call the method `predict_parts` for each and provide one
+# observation as data point and `type="shap"`.
+
+# 3. Plot both decompositions and compare where they might deviate.
