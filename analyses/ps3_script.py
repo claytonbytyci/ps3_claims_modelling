@@ -589,7 +589,47 @@ plt.show()
 # Step:
 # 1. Define DALEX Explainer objects for both.
 
+constrained_explainer = Explainer(
+    model=cv_constrained.best_estimator_,
+    data=X_test_t,
+    y=y_test_t,
+    label="Constrained LGBM"
+)
+
+glm_explainer = Explainer(
+    model=glm_pipeline,
+    data=df_test,
+    y=y_test_t,
+    label="GLM with Splines"
+)
+
 # 2. Call the method `predict_parts` for each and provide one
 # observation as data point and `type="shap"`.
 
+shap_constrained = constrained_explainer.predict_parts(
+    new_observation=X_test_t.iloc[0],
+    type="shap"
+)
+
+shap_glm = glm_explainer.predict_parts(
+    new_observation=df_test.iloc[0],
+    type="shap"
+)
+
 # 3. Plot both decompositions and compare where they might deviate.
+
+shap_constrained.plot()
+plt.title("SHAP Decomposition for Constrained LGBM")
+plt.show()
+
+shap_glm.plot()
+plt.title("SHAP Decomposition for GLM with Splines")
+plt.show()
+
+# The SHAP decomposition for the constrained LGBM shows how each feature contributes
+# to the final prediction, with some features pushing the prediction higher
+# and others pulling it lower. The contributions are generally more complex
+# due to the non-linear nature of the LGBM model.
+# In contrast, the SHAP decomposition for the GLM with Splines is more straightforward,
+# reflecting the additive nature of the GLM. Each feature's contribution is more
+# interpretable, showing clear linear or spline-based effects on the prediction.
