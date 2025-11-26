@@ -466,24 +466,63 @@ plt.show()
 #  the respective function which takes the predictions
 # and actuals as input, as well as some sample weight
 # (in our case exposure).
-
-from ps3.evaluation._evaluate_predictions import evaluate_predictions
-
 # 3. Compute the bias of your estimates as deviation
 #  from the actual exposure adjusted mean
-
 # 4. Compute the deviance.
-
 # 5. Compute the MAE and RMSE.
+
+from ps3_claims_modelling.evaluation._evaluate_predictions import evaluate_predictions
+
+metrics_constrained = evaluate_predictions(
+    y_true=y_test_t,
+    y_pred=df_test["pp_t_lgbm_constrained"],
+    exposure=w_test_t
+)
+metrics_unconstrained = evaluate_predictions(
+    y_true=y_test_t,
+    y_pred=df_test["pp_t_lgbm"],
+    exposure=w_test_t
+)
+
+print("Metrics for Constrained LGBM:")
+print(metrics_constrained)
+print("\nMetrics for Unconstrained LGBM:")
+print(metrics_unconstrained)
 
 # 6. Bonus: Compute the Gini coefficient as defined in the plot
 #  of the Lorentz curve at the bottom of `ps3_script`.
 
+lorenz_x, lorenz_y = lorenz_curve(
+    y_test_t,
+    df_test["pp_t_lgbm_constrained"],
+    w_test_t
+)
+gini_constrained = 1 - 2 * auc(lorenz_x, lorenz_y)
+
+lorenz_x, lorenz_y = lorenz_curve(
+    y_test_t,
+    df_test["pp_t_lgbm"],
+    w_test_t
+)
+gini_unconstrained = 1 - 2 * auc(lorenz_x, lorenz_y)
+
+print(f"Gini Coefficient for Constrained LGBM: {gini_constrained:.4f}")
+print(f"Gini Coefficient for Unconstrained LGBM: {gini_unconstrained:.4f}")
+
 # 7. Return a dataframe with the names of the metrics as index.
+
+metrics_df = pd.DataFrame({
+    "Constrained LGBM": metrics_constrained,
+    "Unconstrained LGBM": metrics_unconstrained
+})
 
 # 8. Use the function and compare the constrained
 # and unconstrained lgbm models.
 
+print("\nComparison of Metrics:")
+print(metrics_df)
+
+#%%
 # # Ex 4 Evaluation plots
 
 ## **Objective**
