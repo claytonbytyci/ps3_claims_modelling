@@ -634,3 +634,5 @@ plt.show()
 # In contrast, the SHAP decomposition for the GLM with Splines is more straightforward,
 # reflecting the additive nature of the GLM. Each feature's contribution is more
 # interpretable, showing clear linear or spline-based effects on the prediction.
+
+# %%
